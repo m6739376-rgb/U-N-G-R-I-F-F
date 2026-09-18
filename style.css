@@ -1,0 +1,127 @@
+/* Variables de couleurs sombres pour le style UNGRIFF */
+:racine {
+  --bg-primaire: #000000;
+  --carte bg: #111111;
+  --texte-primaire: #ffffff;
+  --texte coupé: #888888;
+  --bordure-couleur: #222222;
+}
+
+corps {
+  marge: 0;
+  famille de polices: 'Helvetica Neue', Arial, sans empattement;
+  couleur de fond: var(--bg-primaire);
+  couleur: var(--texte-primaire);
+}
+
+/* Modale de bienvenue */
+.modal-overlay {
+  position: fixe;
+  top: 0;
+  gauche: 0;
+  largeur: 100%;
+  hauteur: 100%;
+  arrière-plan: rgba(0, 0, 0, 0,85);
+  affichage: fléchir;
+  justifier-contenu: centre;
+  aligner les éléments: centre;
+  z-index: 1000;
+}
+
+.carte modale {
+  couleur de fond: var(--carte bg);
+  rembourrage: 2,5rem;
+  rayon de bordure: 8px;
+  frontière: 1px solide var(--frontière-couleur);
+  alignement de texte: centre;
+  largeur maximale: 400px;
+  largeur: 90%;
+}
+
+.marque-titre {
+  interligne: 2px;
+  marge inférieure: 0,5rem;
+}
+
+.sous-titre {
+  couleur: var(--texte-muté);
+  taille de police: 0,9rem;
+  marge inférieure: 2rem;
+}
+
+.boutons d'authentification {
+  affichage: fléchir;
+  flex-direction: colonne;
+  écart: 10px;
+}
+
+/* Boutons */
+.btn {
+  padding: 12px 20px;
+  border-radius: 4px;
+  border: aucun;
+  font-weight: gras;
+  cursor: pointeur;
+  text-decoration: aucun;
+  display: bloc en ligne;
+  text-align: centre;
+}
+
+.btn-google {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+.btn-secondary {
+  background-color: #222222;
+  color: #ffffff;
+}
+
+.btn-link {
+  background: transparent;
+  color: var(--texte-muté);
+  text-decoration: souligner;
+}
+
+.btn-primary {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* En-tête et navigation */
+.navbar {
+  display: fléchir;
+  justify-content: espace entre;
+  align-items: centre;
+  padding: 20px;
+  border-bottom: 1px solide var(--frontière-couleur);
+}
+
+.navbar .logo {
+  font-size: 1.5rem;
+  font-weight: gras;
+  letter-spacing: 3px;
+}
+
+.nav-links a {
+  color: var(--texte-primaire);
+  text-decoration: aucun;
+  margin: 0 15px;
+}
+
+/* Hero Section */
+.hero {
+  text-align: centre;
+  padding: 100px 20px;
+}
+
+.hero h1 {
+  font-size: 3rem;
+  letter-spacing: 5px;
+  margin-bottom: 10px;
+}
+
+.hero p {
+  color: var(--texte-muté);
+  margin-bottom: 30px;
+}
