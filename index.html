@@ -1,14 +1,61 @@
-<div classe="boutons d'authentification">
-  <a href="/api/auth/google" classe="btn btn-google">
-    <svg largeur="18" hauteur="18" viewBox="0 0 24 24">...</svg>
-    Continuer avec Google
-  </a>
-  
-  <bouton onclick="openEmailAuth()" classe="btn btn-secondaire">
-    Continuer avec e-mail
-  </bouton>
-  
-  <bouton onclick="délogerWelcomeModal()" classe="btn btn-link">
-    Pas de maintien
-  </bouton>
-</div>
+<!DOCTYPE HTML>
+<HTML langue="fr">
+<tête>
+  <méta jeu de caractères="UTF-8">
+  <méta nom="fenêtre d'affichage" contenu=« largeur=largeur de l'appareil, échelle initiale=1,0 »>
+  <titre>DÉGRIFFER | Boutique Officielle</titre>
+  <lien rel="feuille de style" href="style.css">
+</tête>
+<corps>
+
+  <!-- Modale de bienvenue -->
+  <div id="bienvenue-modale" classe="superposition modale">
+    <div classe="carte modale">
+      <h2 classe="titre de marque">Bienvenue sur UNGRIFF</h2>
+      <p classe="sous-titre">Rejoignez l'univers UNGRIFF pour accéder à vos commandes et vos favoris.</p>
+      
+      <div classe="boutons d'authentification">
+        <a href="/api/auth/google" classe="btn btn-google">
+          Continuer avec Google
+        </a>
+        
+        <bouton onclick="openEmailAuth()" classe="btn btn-secondaire">
+          Continuer avec e-mail
+        </bouton>
+        
+        <bouton onclick="fermerWelcomeModal()" classe="btn btn-link">
+          Pas de maintien
+        </bouton>
+      </div>
+    </div>
+  </div>
+
+  <!-- En-tête / Navigation -->
+  <en-tête classe="barre de navigation">
+    <div classe="logo">DÉSAGRÉABLE</div>
+    <navigation classe="liens de navigation">
+      <a href="#">Accueil</a>
+      <a href="#boutique">Boutique</a>
+      <a href="#nouveautes">Nouvelles</a>
+    </navigation>
+    <div classe="icône de chariot">Panier (0)</div>
+  </en-tête>
+
+  <!-- Bannière Principale -->
+  <section classe="héros">
+    <h1>DÉSAGRÉABLE</h1>
+    <p>Collection Premium & Minimaliste</p>
+    <a href="#boutique" classe="btn btn-primaire">Découvrir la boutique</a>
+  </section>
+
+  <script>
+    fonction fermerBienvenueModal() {
+      document.getElementById('bienvenue-modale').style.display = 'aucun';
+    }
+
+    fonction ouvrirEmailAuth() {
+      alerte("Redirection vers la connexion par e-mail...");
+    }
+  </script>
+</corps>
+</HTML>
