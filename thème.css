@@ -1,0 +1,31 @@
+:racine {
+  --bg-primaire: #000000;
+  --bg-secondaire: #111111;
+  --texte-primaire: #ffffff;
+  --texte coupé: #888888;
+  --accent-couleur: #ffffff;
+  --carte-bg: #161616;
+  --bouton-bg: #ffffff;
+  --bouton-texte: #000000;
+  --bordure-couleur: #222222;
+}
+
+[thème de données="lumière"] {
+  --bg-primaire: #ffffff;
+  --bg-secondaire: #f5f5f5;
+  --texte-primaire: #000000;
+  --texte coupé: #666666;
+  --accent-couleur: #000000;
+  --carte-bg: #f9f9f9;
+  --bouton-bg: #000000;
+  --bouton-texte: #ffffff;
+  --bordure-couleur: #e5e5e5;
+}
+
+corps {
+  couleur de fond: var(--bg-primaire);
+  couleur: var(--texte-primaire);
+  famille de polices: 'Inter', system-ui, -apple-system, sans-serif;
+  marge: 0;
+  transition: couleur d'arrière-plan 0,3 s facilité, couleur 0,3 s facilité;
+}
