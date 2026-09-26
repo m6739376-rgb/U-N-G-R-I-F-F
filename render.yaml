@@ -1,28 +1,27 @@
 services:
   - type: web
-      name: ungriff-store
-          runtime: node
-              plan: free
-                  buildCommand: npm install
-                      startCommand: npm start
-                          healthCheckPath: /
-                              envVars:
-                                    - key: NODE_VERSION
-                                            value: 20
-                                                  - key: PRINTFUL_API_KEY
-                                                          sync: false
-                                                                - key: GOOGLE_CLIENT_ID
-                                                                        sync: false
-                                                                              - key: ADMIN_EMAIL
-                                                                                      value: m6739376@gmail.com
-                                                                                            - key: PRINTFUL_SYNC_INTERVAL_MS
-                                                                                                    value: 300000
-                                                                                                          - key: STORE_CURRENCY
-                                                                                                                  value: eur
-                                                                                                                        - key: DATABASE_URL
-                                                                                                                                value: ./data/ungriff.db
-                                                                                                                                      - key: STRIPE_SECRET_KEY
-                                                                                                                                              sync: false
-                                                                                                                                                    - key: STRIPE_WEBHOOK_SECRET
-                                                                                                                                                            sync: false
-                                                                                                                                                            
+    name: ungriff-store
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PRINTFUL_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: ADMIN_EMAIL
+        value: m6739376@gmail.com
+      - key: PRINTFUL_SYNC_INTERVAL_MS
+        value: 300000
+      - key: STORE_CURRENCY
+        value: eur
+      - key: DATABASE_URL
+        value: ./data/ungriff.db
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
