@@ -12,6 +12,7 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const publicUrl = process.env.PUBLIC_URL || `http://localhost:${port}`;
 const currency = process.env.STORE_CURRENCY || 'eur';
+const catalogRefreshMs = Number(process.env.PRINTFUL_SYNC_INTERVAL_MS || 5 * 60 * 1000);
 const databasePath = process.env.DATABASE_URL || './data/ungriff.db';
 fs.mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
 const db = new Database(databasePath);
@@ -49,34 +50,56 @@ const printfulHeaders = {
   Authorization: `Bearer ${process.env.PRINTFUL_API_KEY || ''}`,
   'Content-Type': 'application/json'
 };
+let productCache = null;
+let productCacheUpdatedAt = null;
+let productRefresh = null;
 
 async function printful(pathname, options = {}) {
   if (!process.env.PRINTFUL_API_KEY) throw new Error('PRINTFUL_API_KEY is not configured');
   const response = await fetch(`https://api.printful.com${pathname}`, { ...options, headers: { ...printfulHeaders, ...(options.headers || {}) } });
   const body = await response.json();
   if (!response.ok || body.code >= 400) throw new Error(body.error?.message || `Printful error ${response.status}`);
+  if (Array.isArray(body.result) && body.paging) body.result.paging = body.paging;
   return body.result;
 }
 
-function normalizeProduct(product) {
-  const variants = (product.sync_variants || []).map((variant) => ({
-    id: variant.id,
-    productId: variant.product?.product_id || variant.product?.id,
-    name: variant.name,
-    sku: variant.sku,
-    price: Number(variant.retail_price || 0),
-    currency,
-    size: variant.size || '',
-    color: variant.color || '',
-    inStock: variant.availability_status !== 'out_of_stock',
-    image: variant.files?.find((file) => file.type === 'preview' || file.type === 'default')?.preview_url || variant.product?.image,
-    options: variant.options || []
-  }));
+function categoryFor(productName, variantName) {
+  const name = `${productName} ${variantName}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (/t-?shirt|tee\b|tank top|debardeur/.test(name)) return 't-shirts';
+  if (/pants|trousers|jogger|leggings|sweatpants|shorts|pantalon/.test(name)) return 'pantalons';
+  if (/tracksuit|matching set|two-piece|2-piece|ensemble|set \(|hoodie|sweatshirt|sweater|pullover|jacket|coat/.test(name)) return 'ensembles';
+  return 'accessoires';
+}
+
+function normalizeProduct(details) {
+  const product = details.sync_product;
+  if (!product || product.is_ignored) return null;
+  const variants = (details.sync_variants || []).filter((variant) => variant.synced !== false && !variant.is_ignored).map((variant) => {
+    const sourceName = variant.product?.name || variant.name || '';
+    const dimensions = sourceName.match(/\(([^()/]+)\s*\/\s*([^()/]+)\)\s*$/);
+    const imageFile = variant.files?.find((file) => file.type === 'default') || variant.files?.[0];
+    const stockStatus = typeof variant.availability_status === 'string' ? variant.availability_status : '';
+    const price = Number(variant.retail_price);
+    return {
+      id: variant.id,
+      productId: product.id,
+      name: variant.name,
+      sku: variant.sku,
+      price: Number.isFinite(price) ? price : 0,
+      currency: (variant.currency || currency).toLowerCase(),
+      size: variant.size || dimensions?.[2]?.trim() || '',
+      color: variant.color || dimensions?.[1]?.trim() || '',
+      inStock: Number.isFinite(price) && price > 0 && !variant.out_of_stock && !variant.discontinued && !['out_of_stock', 'discontinued'].includes(stockStatus),
+      image: variant.product?.image || imageFile?.preview_url || imageFile?.thumbnail_url || product.thumbnail_url || '',
+      options: variant.options || []
+    };
+  });
   const image = product.thumbnail_url || variants[0]?.image || '';
   return {
     id: product.id,
     name: product.name,
     description: product.description || '',
+    category: categoryFor(product.name, variants[0]?.name || ''),
     image,
     gallery: [...new Set([image, ...variants.map((variant) => variant.image).filter(Boolean)])],
     variants,
@@ -84,9 +107,42 @@ function normalizeProduct(product) {
   };
 }
 
-async function getProducts() {
-  const products = await printful('/store/products');
-  return Promise.all(products.map(async (product) => normalizeProduct(await printful(`/store/products/${product.id}`))));
+async function fetchProducts() {
+  const summaries = [];
+  let offset = 0;
+  let total = Infinity;
+  while (offset < total) {
+    const page = await printful(`/store/products?offset=${offset}&limit=100`);
+    summaries.push(...page);
+    total = page.paging?.total ?? summaries.length;
+    offset += page.paging?.limit || page.length;
+    if (!page.length) break;
+  }
+  const products = [];
+  for (let index = 0; index < summaries.length; index += 5) {
+    const details = await Promise.all(summaries.slice(index, index + 5).map((product) => printful(`/store/products/${product.id}`)));
+    products.push(...details.map(normalizeProduct).filter((product) => product?.variants.length));
+  }
+  productCache = products;
+  productCacheUpdatedAt = new Date().toISOString();
+  return products;
+}
+
+async function getProducts(force = false) {
+  if (!force && productCache && Date.now() - Date.parse(productCacheUpdatedAt) < catalogRefreshMs) return productCache;
+  if (!productRefresh) productRefresh = fetchProducts().finally(() => { productRefresh = null; });
+  return productRefresh;
+}
+
+function requireAdmin(request, response, next) {
+  const expected = process.env.ADMIN_API_KEY || '';
+  const provided = request.get('x-admin-key') || '';
+  const expectedBuffer = Buffer.from(expected);
+  const providedBuffer = Buffer.from(provided);
+  if (!expected || expectedBuffer.length !== providedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {
+    return response.status(expected ? 401 : 503).json({ error: expected ? 'Accès administrateur refusé.' : 'ADMIN_API_KEY n’est pas configurée.' });
+  }
+  next();
 }
 
 function orderNumber() { return `UNG-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`; }
@@ -126,12 +182,20 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
 });
 
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(__dirname));
 app.get('/', (_request, response) => response.sendFile(path.join(__dirname, 'UNGRIFF BOUTIQUE VUE.html')));
 
 app.get('/api/products', async (_request, response) => {
-  try { response.json({ products: await getProducts(), currency }); }
+  try { response.json({ products: await getProducts(), currency, updatedAt: productCacheUpdatedAt }); }
   catch (error) { response.status(503).json({ error: 'Le catalogue Printful est momentanement indisponible.' }); }
+});
+
+app.post('/api/admin/products/refresh', requireAdmin, async (_request, response) => {
+  try {
+    const products = await getProducts(true);
+    response.json({ count: products.length, updatedAt: productCacheUpdatedAt });
+  } catch (error) {
+    response.status(503).json({ error: 'La synchronisation Printful a échoué.' });
+  }
 });
 
 app.post('/api/checkout', async (request, response) => {
@@ -141,14 +205,7 @@ app.post('/api/checkout', async (request, response) => {
   if (!Array.isArray(items) || !items.length || items.some((item) => !Number.isInteger(item.variantId) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 20)) return response.status(400).json({ error: 'Le panier est invalide.' });
   try {
     const products = await getProducts();
-    const catalog = new Map(products.flatMap((product) => product.variants.map((variant) => [String(variant.id), { product, variant }])));
-    const validated = items.map((item) => {
-      const match = catalog.get(String(item.variantId));
-      if (!match || !match.variant.inStock) throw new Error('Une variante sélectionnée n’est plus disponible.');
-      return { variantId: match.variant.id, productId: match.product.id, name: match.product.name, size: match.variant.size, color: match.variant.color, quantity: item.quantity, unitAmount: cents(match.variant.price), sku: match.variant.sku };
-    });
-    const subtotal = validated.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
-    const shipping = shippingFor(subtotal);
+    const { validated, subtotal, shipping } = await validateCart(items);
     const createdOrderNumber = orderNumber();
     const order = db.prepare('INSERT INTO orders (order_number, email, customer_json, items_json, subtotal, shipping, total) VALUES (?, ?, ?, ?, ?, ?, ?)').run(createdOrderNumber, customer.email, JSON.stringify(customer), JSON.stringify(validated), subtotal, shipping, subtotal + shipping);
     const session = await stripe.checkout.sessions.create({
@@ -176,7 +233,7 @@ async function fulfillOrder(order, session) {
   const customer = JSON.parse(order.customer_json);
   const items = JSON.parse(order.items_json);
   try {
-    const printfulOrder = await printful('/orders', { method: 'POST', body: JSON.stringify({ external_id: order.order_number, shipping: 'STANDARD', recipient: { name: `${customer.firstName} ${customer.lastName}`, address1: customer.address, city: customer.city, state_code: customer.state || '', country_code: customer.country, zip: customer.postalCode, email: customer.email, phone: customer.phone || undefined }, items: items.map((item) => ({ sync_variant_id: item.variantId, quantity: item.quantity })) }) });
+    const printfulOrder = await printful('/orders?confirm=1', { method: 'POST', body: JSON.stringify({ external_id: order.order_number, shipping: 'STANDARD', recipient: { name: `${customer.firstName} ${customer.lastName}`, address1: customer.address, city: customer.city, state_code: customer.state || '', country_code: customer.country, zip: customer.postalCode, email: customer.email, phone: customer.phone || undefined }, items: items.map((item) => ({ sync_variant_id: item.variantId, quantity: item.quantity })) }) });
     db.prepare('UPDATE orders SET printful_status = ?, printful_order_id = ? WHERE id = ?').run('created', String(printfulOrder.id), order.id);
   } catch (error) { db.prepare('UPDATE orders SET printful_status = ? WHERE id = ?').run('error', order.id); console.error('Printful fulfillment error:', error.message); }
 }
@@ -191,3 +248,5 @@ app.post('/api/webhooks/printful', async (request, response) => {
 });
 
 app.listen(port, () => console.log(`UNGRIFF running on ${publicUrl}`));
+const catalogTimer = setInterval(() => getProducts(true).catch((error) => console.error('Printful catalog refresh failed:', error.message)), catalogRefreshMs);
+catalogTimer.unref();
