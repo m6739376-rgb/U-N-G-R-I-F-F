@@ -10,7 +10,7 @@ import Stripe from 'stripe'; import { OAuth2Client } from 'google-auth-library';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const publicUrl = process.env.PUBLIC_URL || `http://localhost:${port}`;
+const publicUrl = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
 const currency = process.env.STORE_CURRENCY || 'eur';
 const catalogRefreshMs = Number(process.env.PRINTFUL_SYNC_INTERVAL_MS || 5 * 60 * 1000);
 const databasePath = process.env.DATABASE_URL || './data/ungriff.db';
