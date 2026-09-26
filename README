@@ -1,15 +1,26 @@
 # UNGRIFF Store
 
-Boutique publique UNGRIFF avec catalogue Printful, panier persistant et paiement carte Stripe. Les versements sont geres par le compte Stripe relie au compte bancaire de la boutique.
+Boutique UNGRIFF existante avec catalogue Printful, panier persistant, paiement Stripe et commandes transmises à Printful.
 
 ## Installation
 
 1. Installer Node.js 20+.
-2. Copier `.env.example` vers `.env`.
-3. Renseigner `PRINTFUL_API_KEY`pS3X3nHKZAvf1cWkPKXtdyQRkoXHiYfiC4JQSQo8, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` et `PUBLIC_URL`.
-4. Executer `npm install`, puis `npm start`.
-5. Dans Stripe, terminer la verification du compte et configurer le compte bancaire de versement.
-6. Configurer le webhook Stripe `POST /api/webhooks/stripe` avec les evenements `checkout.session.completed` et `checkout.session.async_payment_succeeded`.
-7. Configurer le webhook Printful `POST /api/webhooks/printful`.
+2. Copier `.env.example` vers `.env` et renseigner `PRINTFUL_API_KEY`, `ADMIN_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` et `PUBLIC_URL`.
+3. Créer une nouvelle clé privée Printful avec les droits Sync Products (lecture) et Orders (lecture/écriture), puis la conserver uniquement dans `.env` ou dans le gestionnaire de secrets de l’hébergeur. Ne pas la publier dans le dépôt.
+4. Définir `ADMIN_API_KEY` avec une clé d’administration longue et aléatoire, distincte du token Printful.
+5. Exécuter `npm install`, puis `npm start`.
+6. Configurer le webhook Stripe `POST /api/webhooks/stripe` pour `checkout.session.completed` et `checkout.session.async_payment_succeeded`, ainsi que le webhook Printful `POST /api/webhooks/printful`.
 
-Les secrets Printful et Stripe ne sont jamais envoyes au navigateur. Stripe Checkout collecte les cartes sur son domaine securise : UNGRIFF ne stocke ni numero de carte ni code bancaire. Le serveur relit les produits Printful, valide les variantes et les prix, puis cree la commande Printful uniquement apres confirmation Stripe. Les fonds sont verses par Stripe vers le compte bancaire configure dans le Dashboard Stripe. Les commandes sont stockees dans SQLite dans `data/ungriff.db`.
+## Catalogue et commandes
+
+Le serveur lit les Sync Products de la boutique Printful, récupère les détails et variantes, et actualise son cache toutes les cinq minutes. `PRINTFUL_SYNC_INTERVAL_MS` permet de changer l’intervalle. Les nouveaux articles apparaissent automatiquement au prochain rafraîchissement du serveur et du navigateur; le bouton d’actualisation est dans Boutique ou Admin. L’espace Admin demande `ADMIN_API_KEY` et ne stocke pas cette clé dans le navigateur.
+
+Les catégories sont attribuées d’après les noms des produits et variantes Printful. Les prix et stocks sont revalidés côté serveur au paiement. Le panier transmet l’ID Sync Variant Printful, et la commande est confirmée pour exécution uniquement après le paiement Stripe.
+
+Pour tester un nouveau produit, ajoutez-le à la boutique Printful avec au moins une variante synchronisée et un prix de vente, puis attendez au plus cinq minutes ou ouvrez Boutique > Actualiser les produits et saisissez `ADMIN_API_KEY`. Le nouveau produit doit apparaître sans modification du HTML. Pour tester l’envoi d’une commande, utilisez d’abord Stripe en mode test et vérifiez son statut dans l’administration Printful.
+
+## Sécurité
+
+Un ancien README contenait une valeur ressemblant à un token Printful. Elle a été supprimée. Considérez ce token comme compromis et révoquez-le dans Printful, même s’il a seulement été utilisé localement; créez-en un nouveau et mettez à jour la variable `PRINTFUL_API_KEY`. Ne partagez pas le contenu de `.env`.
+
+Les secrets Printful et Stripe restent côté serveur. Stripe Checkout collecte les cartes sur son domaine sécurisé; UNGRIFF ne stocke pas les données bancaires. Les commandes sont conservées dans SQLite sous `data/ungriff.db`.
