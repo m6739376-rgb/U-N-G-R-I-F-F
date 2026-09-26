@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import Stripe from 'stripe';
+import Stripe from 'stripe'; import { OAuth2Client } from 'google-auth-library';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -16,7 +16,7 @@ const catalogRefreshMs = Number(process.env.PRINTFUL_SYNC_INTERVAL_MS || 5 * 60 
 const databasePath = process.env.DATABASE_URL || './data/ungriff.db';
 fs.mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
 const db = new Database(databasePath);
-const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null; const googleAuthClient = new OAuth2Client(); const adminEmail = (process.env.ADMIN_EMAIL || 'm6739376@gmail.com').toLowerCase();
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS orders (
@@ -134,15 +134,15 @@ async function getProducts(force = false) {
   return productRefresh;
 }
 
-function requireAdmin(request, response, next) {
-  const expected = process.env.ADMIN_API_KEY || '';
-  const provided = request.get('x-admin-key') || '';
-  const expectedBuffer = Buffer.from(expected);
-  const providedBuffer = Buffer.from(provided);
-  if (!expected || expectedBuffer.length !== providedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {
-    return response.status(expected ? 401 : 503).json({ error: expected ? 'Accès administrateur refusé.' : 'ADMIN_API_KEY n’est pas configurée.' });
+async function requireAdmin(request, response, next) {
+  const clientId = process.env.GOOGLE_CLIENT_ID; if (!clientId) return response.status(503).json({ error: 'GOOGLE_CLIENT_ID n’est pas configuré.' });
+  const credential = request.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]; if (!credential) return response.status(401).json({ error: 'Connecte-toi avec le compte Google administrateur.' });
+  try { const ticket = await googleAuthClient.verifyIdToken({ idToken: credential, audience: clientId });
+  const payload = ticket.getPayload();
+  if (!payload?.email_verified || payload.email?.toLowerCase() !== adminEmail) {
+    return response.status(403).json({ error: 'Ce compte Google ne peut pas accéder à l’administration.' });
   }
-  next();
+  request.adminEmail = payload.email; next(); } catch { response.status(401).json({ error: 'Connexion Google invalide ou expirée. Reconnecte-toi.' }); }
 }
 
 function orderNumber() { return `UNG-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`; }
@@ -182,19 +182,19 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
 });
 
 app.use(express.json({ limit: '1mb' }));
-app.get('/', (_request, response) => response.sendFile(path.join(__dirname, 'UNGRIFF BOUTIQUE VUE.html')));
+app.get('/', (_request, response) => response.sendFile(path.join(__dirname, fs.existsSync(path.join(__dirname, 'index.html')) ? 'index.html' : 'UNGRIFF BOUTIQUE VUE.html')));
 
 app.get('/api/products', async (_request, response) => {
   try { response.json({ products: await getProducts(), currency, updatedAt: productCacheUpdatedAt }); }
-  catch (error) { response.status(503).json({ error: 'Le catalogue Printful est momentanement indisponible.' }); }
+  catch (error) { console.error('Printful catalog request failed:', error.message); response.status(503).json({ error: 'Le catalogue Printful est momentanément indisponible. Vérifiez les journaux du serveur.' }); }
 });
 
-app.post('/api/admin/products/refresh', requireAdmin, async (_request, response) => {
+app.get('/api/admin/config', (_request, response) => { if (!process.env.GOOGLE_CLIENT_ID) return response.status(503).json({ error: 'GOOGLE_CLIENT_ID n’est pas configuré.' }); response.json({ clientId: process.env.GOOGLE_CLIENT_ID }); }); app.get('/api/admin/session', requireAdmin, (request, response) => response.json({ email: request.adminEmail })); app.post('/api/admin/products/refresh', requireAdmin, async (_request, response) => {
   try {
     const products = await getProducts(true);
     response.json({ count: products.length, updatedAt: productCacheUpdatedAt });
   } catch (error) {
-    response.status(503).json({ error: 'La synchronisation Printful a échoué.' });
+    console.error('Manual Printful catalog refresh failed:', error.message); response.status(503).json({ error: 'La synchronisation Printful a échoué.' });
   }
 });
 
