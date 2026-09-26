@@ -1,21 +1,32 @@
 # UNGRIFF Store
 
-Boutique UNGRIFF avec catalogue Printful, panier, paiement Stripe et commandes transmises à Printful.
+Boutique UNGRIFF avec catalogue Printful, panier persistant et paiement par virement bancaire manuel.
 
-## Déploiement Render
+## Installation
 
-Le dépôt contient `render.yaml` pour lancer le serveur Node sur Render. Connecte ce dépôt à Render et crée un Blueprint. Le service doit tourner sur Render : GitHub Pages ne peut pas exécuter l’API Node/Printful.
+1. Installer Node.js 20+.
+2. Copier `.env.example` vers `.env` et renseigner `PRINTFUL_API_KEY`, `GOOGLE_CLIENT_ID`, `BANK_ACCOUNT_HOLDER` et `BANK_IBAN`. `BANK_BIC` est facultatif.
+3. Créer une nouvelle clé privée Printful avec les droits Sync Products (lecture) et Orders (lecture/écriture), puis la conserver uniquement dans `.env` ou dans le gestionnaire de secrets de l’hébergeur. Ne pas la publier dans le dépôt.
+4. Créer un identifiant client OAuth de type application Web dans Google Cloud Console et définir `GOOGLE_CLIENT_ID`. Ajouter les origines autorisées du site dans la configuration OAuth. `ADMIN_EMAIL` est limité par défaut à `m6739376@gmail.com`; la connexion Google doit utiliser cette adresse vérifiée.
+5. Exécuter `npm install`, puis `npm start`.
+6. Configurer le webhook Printful `POST /api/webhooks/printful` pour le suivi des commandes.
 
-Dans les variables Render, configure `PRINTFUL_API_KEY` avec une nouvelle clé Printful ayant les droits Sync Products en lecture et Orders en lecture/écriture. L’ancienne clé a été publiée dans ce dépôt : révoque-la immédiatement dans Printful. Ne mets jamais de clés dans GitHub.
+## Déploiement test sur Render
 
-Configure un client OAuth Google de type application Web. Ajoute l’URL HTTPS Render dans les origines JavaScript autorisées, puis renseigne `GOOGLE_CLIENT_ID`. L’adresse Admin autorisée par défaut est `m6739376@gmail.com`.
+Connecter le dépôt GitHub à Render en créant un Blueprint à partir de `render.yaml`. Renseigner les variables demandées dans le tableau de bord Render; ne pas ajouter de clé ni de coordonnées bancaires au dépôt. Ajouter l’URL HTTPS Render aux origines JavaScript autorisées du client OAuth Google. Le `GOOGLE_CLIENT_ID` active l’espace Admin.
 
-Configure `STRIPE_SECRET_KEY` et `STRIPE_WEBHOOK_SECRET` dans Render avant d’activer les paiements. Render fournit automatiquement l’URL publique au serveur.
+Ce Blueprint utilise l’offre gratuite pour les essais : le service peut s’endormir après une période d’inactivité et le fichier SQLite est éphémère. Les commandes de test peuvent donc être perdues lors d’un redémarrage ou redéploiement. Ne pas utiliser cette configuration pour de vraies ventes sans stockage persistant.
 
-## Catalogue
+## Catalogue et commandes
 
-Les produits synchronisés dans la boutique Printful sont chargés par l’API du serveur. Le cache se met à jour toutes les cinq minutes; l’actualisation manuelle est disponible dans Admin après connexion Google. Les nouveaux produits doivent avoir des variantes synchronisées et un prix de vente.
+Le serveur lit les Sync Products de la boutique Printful, récupère les détails et variantes, et actualise son cache toutes les cinq minutes. `PRINTFUL_SYNC_INTERVAL_MS` permet de changer l’intervalle. Dans Admin, le compte Google autorisé peut actualiser le catalogue immédiatement.
 
-## Essais gratuits
+Les catégories sont attribuées d’après les noms des produits et variantes Printful. Les prix et stocks sont revalidés côté serveur lors de la création d’une commande. Le client reçoit le titulaire, l’IBAN, le BIC facultatif et la référence à indiquer dans le virement. La commande reste en attente : après avoir vérifié la réception du montant sur le compte, l’administrateur la marque comme payée dans Admin. C’est seulement alors que la commande est envoyée à Printful.
 
-L’offre Render gratuite peut arrêter le service après inactivité. Le fichier SQLite est temporaire sur cette offre et les commandes peuvent être perdues au redémarrage ou redéploiement. Utilise cette configuration uniquement pour des essais, pas pour de vraies ventes.
+Pour tester un nouveau produit, ajoutez-le à la boutique Printful avec au moins une variante synchronisée et un prix de vente, puis attendez au plus cinq minutes ou actualisez depuis Admin. Le nouveau produit doit apparaître sans modification du HTML. Vérifiez manuellement le virement avant de marquer la commande payée.
+
+## Sécurité
+
+Une ancienne clé Printful a été publiée dans le dépôt. Considérez-la comme compromise et révoquez-la dans Printful; créez-en une nouvelle et ajoutez-la seulement dans les variables privées de Render. Ne partagez pas le contenu de `.env`.
+
+Les coordonnées `BANK_ACCOUNT_HOLDER`, `BANK_IBAN` et `BANK_BIC` restent dans les variables privées du serveur. L’IBAN et le titulaire sont ensuite affichés au client au moment de payer par virement. Aucune connexion au compte bancaire ni clé API bancaire n’est utilisée. Les commandes sont conservées dans SQLite sous `data/ungriff.db`.
