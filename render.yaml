@@ -21,7 +21,7 @@ services:
         value: eur
       - key: DATABASE_URL
         value: ./data/ungriff.db
-      - key: STRIPE_SECRET_KEY
+      - key: BANK_ACCOUNT_HOLDER
         sync: false
-      - key: STRIPE_WEBHOOK_SECRET
+      - key: BANK_IBAN
         sync: false
