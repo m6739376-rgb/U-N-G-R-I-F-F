@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import Stripe from 'stripe'; import { OAuth2Client } from 'google-auth-library';
+import { OAuth2Client } from 'google-auth-library';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -16,7 +16,8 @@ const catalogRefreshMs = Number(process.env.PRINTFUL_SYNC_INTERVAL_MS || 5 * 60 
 const databasePath = process.env.DATABASE_URL || './data/ungriff.db';
 fs.mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
 const db = new Database(databasePath);
-const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null; const googleAuthClient = new OAuth2Client(); const adminEmail = (process.env.ADMIN_EMAIL || 'm6739376@gmail.com').toLowerCase();
+const googleAuthClient = new OAuth2Client();
+const adminEmail = (process.env.ADMIN_EMAIL || 'm6739376@gmail.com').toLowerCase();
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS orders (
@@ -40,7 +41,7 @@ db.exec(`
     received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 `);
-for (const column of ["payment_provider TEXT NOT NULL DEFAULT 'stripe'"]) {
+for (const column of ["payment_provider TEXT NOT NULL DEFAULT 'bank_transfer'"]) {
   try { db.exec(`ALTER TABLE orders ADD COLUMN ${column}`); } catch (error) {
     if (!error.message.includes('duplicate column name')) throw error;
   }
@@ -135,19 +136,32 @@ async function getProducts(force = false) {
 }
 
 async function requireAdmin(request, response, next) {
-  const clientId = process.env.GOOGLE_CLIENT_ID; if (!clientId) return response.status(503).json({ error: 'GOOGLE_CLIENT_ID n’est pas configuré.' });
-  const credential = request.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]; if (!credential) return response.status(401).json({ error: 'Connecte-toi avec le compte Google administrateur.' });
-  try { const ticket = await googleAuthClient.verifyIdToken({ idToken: credential, audience: clientId });
-  const payload = ticket.getPayload();
-  if (!payload?.email_verified || payload.email?.toLowerCase() !== adminEmail) {
-    return response.status(403).json({ error: 'Ce compte Google ne peut pas accéder à l’administration.' });
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) return response.status(503).json({ error: 'GOOGLE_CLIENT_ID n’est pas configuré.' });
+  const credential = request.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!credential) return response.status(401).json({ error: 'Connecte-toi avec le compte Google administrateur.' });
+  try {
+    const ticket = await googleAuthClient.verifyIdToken({ idToken: credential, audience: clientId });
+    const payload = ticket.getPayload();
+    if (!payload?.email_verified || payload.email?.toLowerCase() !== adminEmail) {
+      return response.status(403).json({ error: 'Ce compte Google ne peut pas accéder à l’administration.' });
+    }
+    request.adminEmail = payload.email;
+    next();
+  } catch {
+    response.status(401).json({ error: 'Connexion Google invalide ou expirée. Reconnecte-toi.' });
   }
-  request.adminEmail = payload.email; next(); } catch { response.status(401).json({ error: 'Connexion Google invalide ou expirée. Reconnecte-toi.' }); }
 }
 
 function orderNumber() { return `UNG-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`; }
 function cents(value) { return Math.round(Number(value) * 100); }
 function shippingFor(subtotal) { return subtotal >= 12000 ? 0 : 790; }
+function bankTransferDetails() {
+  const accountHolder = (process.env.BANK_ACCOUNT_HOLDER || '').trim();
+  const iban = (process.env.BANK_IBAN || '').replace(/\s/g, '').toUpperCase();
+  if (!accountHolder || !iban) return null;
+  return { accountHolder, iban, bic: (process.env.BANK_BIC || '').replace(/\s/g, '').toUpperCase() };
+}
 function validateCustomerAndItems(customer, items) {
   if (!customer?.email || !customer.firstName || !customer.lastName || !customer.address || !customer.city || !customer.postalCode || !customer.country) throw new Error('Les informations de livraison sont incompletes.');
   if (!Array.isArray(items) || !items.length || items.some((item) => !Number.isInteger(item.variantId) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 20)) throw new Error('Le panier est invalide.');
@@ -166,64 +180,65 @@ async function validateCart(items) {
 }
 function orderAmount(total) { return (total / 100).toFixed(2); }
 
-app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (request, response) => {
-  if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) return response.status(503).send('Stripe is not configured');
-  let event;
-  try { event = stripe.webhooks.constructEvent(request.body, request.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET); }
-  catch { return response.status(400).send('Invalid signature'); }
-  if (db.prepare('SELECT id FROM webhook_events WHERE id = ?').get(event.id)) return response.json({ received: true });
-  db.prepare('INSERT INTO webhook_events (id, provider) VALUES (?, ?)').run(event.id, 'stripe');
-  if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) {
-    const session = event.data.object;
-    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(session.metadata?.orderId);
-    if (order && order.payment_status !== 'paid' && (event.type === 'checkout.session.async_payment_succeeded' || session.payment_status === 'paid')) await fulfillOrder(order, session);
-  }
-  response.json({ received: true });
-});
-
 app.use(express.json({ limit: '1mb' }));
-app.get('/', (_request, response) => response.sendFile(path.join(__dirname, fs.existsSync(path.join(__dirname, 'index.html')) ? 'index.html' : 'UNGRIFF BOUTIQUE VUE.html')));
+const homepageFile = ['index.html', 'UNGRIFF BOUTIQUE VUE.html'].find((filename) => fs.existsSync(path.join(__dirname, filename))) || 'index.html';
+app.get('/', (_request, response) => response.sendFile(path.join(__dirname, homepageFile)));
 
 app.get('/api/products', async (_request, response) => {
   try { response.json({ products: await getProducts(), currency, updatedAt: productCacheUpdatedAt }); }
   catch (error) { console.error('Printful catalog request failed:', error.message); response.status(503).json({ error: 'Le catalogue Printful est momentanément indisponible. Vérifiez les journaux du serveur.' }); }
 });
 
-app.get('/api/admin/config', (_request, response) => { if (!process.env.GOOGLE_CLIENT_ID) return response.status(503).json({ error: 'GOOGLE_CLIENT_ID n’est pas configuré.' }); response.json({ clientId: process.env.GOOGLE_CLIENT_ID }); }); app.get('/api/admin/session', requireAdmin, (request, response) => response.json({ email: request.adminEmail })); app.post('/api/admin/products/refresh', requireAdmin, async (_request, response) => {
+app.get('/api/admin/config', (_request, response) => {
+  if (!process.env.GOOGLE_CLIENT_ID) return response.status(503).json({ error: 'GOOGLE_CLIENT_ID n’est pas configuré.' });
+  response.json({ clientId: process.env.GOOGLE_CLIENT_ID });
+});
+
+app.get('/api/admin/session', requireAdmin, (request, response) => {
+  response.json({ email: request.adminEmail });
+});
+
+app.post('/api/admin/products/refresh', requireAdmin, async (_request, response) => {
   try {
     const products = await getProducts(true);
     response.json({ count: products.length, updatedAt: productCacheUpdatedAt });
   } catch (error) {
-    console.error('Manual Printful catalog refresh failed:', error.message); response.status(503).json({ error: 'La synchronisation Printful a échoué.' });
+    console.error('Manual Printful catalog refresh failed:', error.message);
+    response.status(503).json({ error: 'La synchronisation Printful a échoué.' });
   }
 });
 
-app.post('/api/checkout', async (request, response) => {
-  if (!stripe) return response.status(503).json({ error: 'Le paiement Stripe n’est pas encore configure.' });
+app.get('/api/admin/orders', requireAdmin, (_request, response) => {
+  const orders = db.prepare("SELECT order_number, email, total, created_at FROM orders WHERE payment_provider = 'bank_transfer' AND payment_status = 'pending' ORDER BY created_at DESC").all();
+  response.json({ orders: orders.map((order) => ({ ...order, total: order.total / 100, currency })) });
+});
+
+app.post('/api/admin/orders/:orderNumber/mark-paid', requireAdmin, async (request, response) => {
+  const order = db.prepare('SELECT * FROM orders WHERE order_number = ?').get(request.params.orderNumber);
+  if (!order) return response.status(404).json({ error: 'Commande introuvable.' });
+  if (order.payment_provider !== 'bank_transfer') return response.status(409).json({ error: 'Cette commande n’a pas été payée par virement.' });
+  if (order.payment_status === 'paid') return response.status(409).json({ error: 'Cette commande est déjà marquée comme payée.' });
+  await fulfillOrder(order);
+  const updated = db.prepare('SELECT payment_status, printful_status FROM orders WHERE id = ?').get(order.id);
+  response.json(updated);
+});
+
+app.post('/api/bank-transfer', async (request, response) => {
+  if (!bankTransferDetails()) return response.status(503).json({ error: 'Le paiement par virement n’est pas encore configuré.' });
   const { customer, items } = request.body || {};
-  if (!customer?.email || !customer.firstName || !customer.lastName || !customer.address || !customer.city || !customer.postalCode || !customer.country) return response.status(400).json({ error: 'Les informations de livraison sont incompletes.' });
-  if (!Array.isArray(items) || !items.length || items.some((item) => !Number.isInteger(item.variantId) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 20)) return response.status(400).json({ error: 'Le panier est invalide.' });
   try {
-    const products = await getProducts();
+    validateCustomerAndItems(customer, items);
     const { validated, subtotal, shipping } = await validateCart(items);
     const createdOrderNumber = orderNumber();
-    const order = db.prepare('INSERT INTO orders (order_number, email, customer_json, items_json, subtotal, shipping, total) VALUES (?, ?, ?, ?, ?, ?, ?)').run(createdOrderNumber, customer.email, JSON.stringify(customer), JSON.stringify(validated), subtotal, shipping, subtotal + shipping);
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      customer_email: customer.email,
-      line_items: [...validated.map((item) => ({ price_data: { currency, product_data: { name: `${item.name} · ${item.size || item.color || 'Standard'}` }, unit_amount: item.unitAmount }, quantity: item.quantity })), ...(shipping ? [{ price_data: { currency, product_data: { name: 'Livraison' }, unit_amount: shipping }, quantity: 1 }] : [])],
-      metadata: { orderId: String(order.lastInsertRowid) },
-      success_url: `${publicUrl}/?view=confirmation&order=${createdOrderNumber}`,
-      cancel_url: `${publicUrl}/?view=checkout`
-    });
-    response.json({ checkoutUrl: session.url, orderNumber: createdOrderNumber });
+    db.prepare('INSERT INTO orders (order_number, email, customer_json, items_json, subtotal, shipping, total, payment_provider) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(createdOrderNumber, customer.email, JSON.stringify(customer), JSON.stringify(validated), subtotal, shipping, subtotal + shipping, 'bank_transfer');
+    response.json({ orderNumber: createdOrderNumber });
   } catch (error) { response.status(400).json({ error: error.message || 'Impossible de créer la commande.' }); }
 });
 
 app.get('/api/orders/:orderNumber', (request, response) => {
-  const order = db.prepare('SELECT order_number, email, items_json, subtotal, shipping, total, payment_status, printful_status, tracking_json, created_at FROM orders WHERE order_number = ?').get(request.params.orderNumber);
+  const order = db.prepare('SELECT order_number, email, items_json, subtotal, shipping, total, payment_status, payment_provider, printful_status, tracking_json, created_at FROM orders WHERE order_number = ?').get(request.params.orderNumber);
   if (!order) return response.status(404).json({ error: 'Commande introuvable.' });
-  response.json({ ...order, items: JSON.parse(order.items_json), tracking: order.tracking_json ? JSON.parse(order.tracking_json) : [] });
+  response.json({ ...order, bankTransfer: order.payment_provider === 'bank_transfer' ? bankTransferDetails() : null, items: JSON.parse(order.items_json), tracking: order.tracking_json ? JSON.parse(order.tracking_json) : [] });
 });
 
 async function fulfillOrder(order, session) {
