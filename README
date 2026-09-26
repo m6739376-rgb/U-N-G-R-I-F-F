@@ -1,0 +1,15 @@
+# UNGRIFF Store
+
+Boutique publique UNGRIFF avec catalogue Printful, panier persistant et paiement carte Stripe. Les versements sont geres par le compte Stripe relie au compte bancaire de la boutique.
+
+## Installation
+
+1. Installer Node.js 20+.
+2. Copier `.env.example` vers `.env`.
+3. Renseigner `PRINTFUL_API_KEY`pS3X3nHKZAvf1cWkPKXtdyQRkoXHiYfiC4JQSQo8, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` et `PUBLIC_URL`.
+4. Executer `npm install`, puis `npm start`.
+5. Dans Stripe, terminer la verification du compte et configurer le compte bancaire de versement.
+6. Configurer le webhook Stripe `POST /api/webhooks/stripe` avec les evenements `checkout.session.completed` et `checkout.session.async_payment_succeeded`.
+7. Configurer le webhook Printful `POST /api/webhooks/printful`.
+
+Les secrets Printful et Stripe ne sont jamais envoyes au navigateur. Stripe Checkout collecte les cartes sur son domaine securise : UNGRIFF ne stocke ni numero de carte ni code bancaire. Le serveur relit les produits Printful, valide les variantes et les prix, puis cree la commande Printful uniquement apres confirmation Stripe. Les fonds sont verses par Stripe vers le compte bancaire configure dans le Dashboard Stripe. Les commandes sont stockees dans SQLite dans `data/ungriff.db`.
