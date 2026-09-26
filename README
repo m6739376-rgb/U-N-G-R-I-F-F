@@ -1,26 +1,21 @@
 # UNGRIFF Store
 
-Boutique UNGRIFF existante avec catalogue Printful, panier persistant, paiement Stripe et commandes transmises à Printful.
+Boutique UNGRIFF avec catalogue Printful, panier, paiement Stripe et commandes transmises à Printful.
 
-## Installation
+## Déploiement Render
 
-1. Installer Node.js 20+.
-2. Copier `.env.example` vers `.env` et renseigner `PRINTFUL_API_KEY`, `ADMIN_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` et `PUBLIC_URL`.
-3. Créer une nouvelle clé privée Printful avec les droits Sync Products (lecture) et Orders (lecture/écriture), puis la conserver uniquement dans `.env` ou dans le gestionnaire de secrets de l’hébergeur. Ne pas la publier dans le dépôt.
-4. Définir `ADMIN_API_KEY` avec une clé d’administration longue et aléatoire, distincte du token Printful.
-5. Exécuter `npm install`, puis `npm start`.
-6. Configurer le webhook Stripe `POST /api/webhooks/stripe` pour `checkout.session.completed` et `checkout.session.async_payment_succeeded`, ainsi que le webhook Printful `POST /api/webhooks/printful`.
+Le dépôt contient `render.yaml` pour lancer le serveur Node sur Render. Connecte ce dépôt à Render et crée un Blueprint. Le service doit tourner sur Render : GitHub Pages ne peut pas exécuter l’API Node/Printful.
 
-## Catalogue et commandes
+Dans les variables Render, configure `PRINTFUL_API_KEY` avec une nouvelle clé Printful ayant les droits Sync Products en lecture et Orders en lecture/écriture. L’ancienne clé a été publiée dans ce dépôt : révoque-la immédiatement dans Printful. Ne mets jamais de clés dans GitHub.
 
-Le serveur lit les Sync Products de la boutique Printful, récupère les détails et variantes, et actualise son cache toutes les cinq minutes. `PRINTFUL_SYNC_INTERVAL_MS` permet de changer l’intervalle. Les nouveaux articles apparaissent automatiquement au prochain rafraîchissement du serveur et du navigateur; le bouton d’actualisation est dans Boutique ou Admin. L’espace Admin demande `ADMIN_API_KEY` et ne stocke pas cette clé dans le navigateur.
+Configure un client OAuth Google de type application Web. Ajoute l’URL HTTPS Render dans les origines JavaScript autorisées, puis renseigne `GOOGLE_CLIENT_ID`. L’adresse Admin autorisée par défaut est `m6739376@gmail.com`.
 
-Les catégories sont attribuées d’après les noms des produits et variantes Printful. Les prix et stocks sont revalidés côté serveur au paiement. Le panier transmet l’ID Sync Variant Printful, et la commande est confirmée pour exécution uniquement après le paiement Stripe.
+Configure `STRIPE_SECRET_KEY` et `STRIPE_WEBHOOK_SECRET` dans Render avant d’activer les paiements. Render fournit automatiquement l’URL publique au serveur.
 
-Pour tester un nouveau produit, ajoutez-le à la boutique Printful avec au moins une variante synchronisée et un prix de vente, puis attendez au plus cinq minutes ou ouvrez Boutique > Actualiser les produits et saisissez `ADMIN_API_KEY`. Le nouveau produit doit apparaître sans modification du HTML. Pour tester l’envoi d’une commande, utilisez d’abord Stripe en mode test et vérifiez son statut dans l’administration Printful.
+## Catalogue
 
-## Sécurité
+Les produits synchronisés dans la boutique Printful sont chargés par l’API du serveur. Le cache se met à jour toutes les cinq minutes; l’actualisation manuelle est disponible dans Admin après connexion Google. Les nouveaux produits doivent avoir des variantes synchronisées et un prix de vente.
 
-Un ancien README contenait une valeur ressemblant à un token Printful. Elle a été supprimée. Considérez ce token comme compromis et révoquez-le dans Printful, même s’il a seulement été utilisé localement; créez-en un nouveau et mettez à jour la variable `PRINTFUL_API_KEY`. Ne partagez pas le contenu de `.env`.
+## Essais gratuits
 
-Les secrets Printful et Stripe restent côté serveur. Stripe Checkout collecte les cartes sur son domaine sécurisé; UNGRIFF ne stocke pas les données bancaires. Les commandes sont conservées dans SQLite sous `data/ungriff.db`.
+L’offre Render gratuite peut arrêter le service après inactivité. Le fichier SQLite est temporaire sur cette offre et les commandes peuvent être perdues au redémarrage ou redéploiement. Utilise cette configuration uniquement pour des essais, pas pour de vraies ventes.
