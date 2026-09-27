@@ -5,12 +5,18 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply ungriff-store-db --local",
+    "db:remote": "wrangler d1 migrations apply ungriff-store-db --remote"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "stripe": "^17.5.0"
+    "google-auth-library": "^9.15.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
   }
 }
