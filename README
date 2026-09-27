@@ -1,32 +1,64 @@
 # UNGRIFF Store
 
-Boutique UNGRIFF avec catalogue Printful, panier persistant et paiement par virement bancaire manuel.
+Boutique UNGRIFF existante, préparée pour Cloudflare Workers, Cloudflare D1, Printful et Stripe Checkout. Le code public ne contient aucune clé.
 
-## Installation
+## Choix d’hébergement
 
-1. Installer Node.js 20+.
-2. Copier `.env.example` vers `.env` et renseigner `PRINTFUL_API_KEY`, `GOOGLE_CLIENT_ID`, `BANK_ACCOUNT_HOLDER` et `BANK_IBAN`. `BANK_BIC` est facultatif.
-3. Créer une nouvelle clé privée Printful avec les droits Sync Products (lecture) et Orders (lecture/écriture), puis la conserver uniquement dans `.env` ou dans le gestionnaire de secrets de l’hébergeur. Ne pas la publier dans le dépôt.
-4. Créer un identifiant client OAuth de type application Web dans Google Cloud Console et définir `GOOGLE_CLIENT_ID`. Ajouter les origines autorisées du site dans la configuration OAuth. `ADMIN_EMAIL` est limité par défaut à `m6739376@gmail.com`; la connexion Google doit utiliser cette adresse vérifiée.
-5. Exécuter `npm install`, puis `npm start`.
-6. Configurer le webhook Printful `POST /api/webhooks/printful` pour le suivi des commandes.
+Le projet local dépendait de Express et de `better-sqlite3`, qui ne peuvent pas être utilisés tels quels dans un Worker. La nouvelle API est une Cloudflare Worker en JavaScript Web APIs; les commandes et le catalogue sont persistés dans D1. Le HTML et les images Printful sont servis comme assets du même Worker.
 
-## Déploiement test sur Render
+Les quotas gratuits documentés au 27 septembre 2026 comprennent 100 000 requêtes Worker par jour, 10 ms de CPU par requête et 50 sous-requêtes par invocation. D1 Free permet jusqu’à 500 MB par base, 5 GB de stockage par compte et 7 jours de restauration temporelle. Ces quotas peuvent évoluer; surveille le tableau de bord Cloudflare. Les frais Stripe par paiement et les coûts de fabrication/livraison Printful restent à la charge du vendeur.
 
-Connecter le dépôt GitHub à Render en créant un Blueprint à partir de `render.yaml`. Renseigner les variables demandées dans le tableau de bord Render; ne pas ajouter de clé ni de coordonnées bancaires au dépôt. Ajouter l’URL HTTPS Render aux origines JavaScript autorisées du client OAuth Google. Le `GOOGLE_CLIENT_ID` active l’espace Admin.
+## Fonctionnalités
 
-Ce Blueprint utilise l’offre gratuite pour les essais : le service peut s’endormir après une période d’inactivité et le fichier SQLite est éphémère. Les commandes de test peuvent donc être perdues lors d’un redémarrage ou redéploiement. Ne pas utiliser cette configuration pour de vraies ventes sans stockage persistant.
+- Catalogue des produits synchronisés de la boutique Printful, actualisé par tâche planifiée toutes les cinq minutes et depuis Admin.
+- Panier, choix de variantes, filtres par catégorie/taille/couleur/prix, prix côté serveur et devis de livraison Printful.
+- Paiement hébergé par Stripe Checkout; les commandes ne sont marquées payées qu’après validation de la signature du webhook Stripe et du montant.
+- Envoi idempotent des commandes payées à Printful; commandes par virement manuel conservées comme option.
+- Administration Google limitée à `ADMIN_EMAIL`, avec commandes, préparation Printful, liens de suivi, prix/collections, codes promotionnels et ventes encaissées.
+- Page `/track` pour consulter le paiement, l’état Printful et le suivi d’une commande.
 
-## Catalogue et commandes
+## Préparer Cloudflare
 
-Le serveur lit les Sync Products de la boutique Printful, récupère les détails et variantes, et actualise son cache toutes les cinq minutes. `PRINTFUL_SYNC_INTERVAL_MS` permet de changer l’intervalle. Dans Admin, le compte Google autorisé peut actualiser le catalogue immédiatement.
+Prérequis : Node.js 22+, un compte Cloudflare gratuit, un compte GitHub et un compte Printful. Stripe est nécessaire pour accepter les cartes; les commissions de transaction ne sont pas gratuites.
 
-Les catégories sont attribuées d’après les noms des produits et variantes Printful. Les prix et stocks sont revalidés côté serveur lors de la création d’une commande. Le client reçoit le titulaire, l’IBAN, le BIC facultatif et la référence à indiquer dans le virement. La commande reste en attente : après avoir vérifié la réception du montant sur le compte, l’administrateur la marque comme payée dans Admin. C’est seulement alors que la commande est envoyée à Printful.
+1. Dans le dépôt GitHub `m6739376-rgb/U-N-G-R-I-F-F`, ajoute les fichiers de ce projet sans publier de fichier `.env`, `.dev.vars` ou secret. Connecte le dépôt local à `main` avec Git avant de pousser si ce dossier n’est pas déjà un clone.
+2. Dans le clone Git, exécute `npm install`, puis `npx wrangler login`.
+3. Crée la base distante avec `npx wrangler d1 create ungriff-store-db`. Remplace `REPLACE_WITH_D1_DATABASE_ID` dans `wrangler.jsonc` par l’identifiant renvoyé.
+4. Applique le schéma avec `npm run db:remote`.
+5. Pour une première version directe, publie le Worker avec `npx wrangler deploy`; l’API restera indisponible tant que ses secrets ne sont pas installés. Pour GitHub Actions, ajoute d’abord `CLOUDFLARE_API_TOKEN` et `CLOUDFLARE_ACCOUNT_ID` comme décrit ci-dessous, puis pousse sur `main`.
+6. Après la première publication, configure les secrets Worker dans le tableau de bord Cloudflare ou avec `npx wrangler secret put NOM_DU_SECRET`. Chaque commande demande la valeur directement dans le terminal :
 
-Pour tester un nouveau produit, ajoutez-le à la boutique Printful avec au moins une variante synchronisée et un prix de vente, puis attendez au plus cinq minutes ou actualisez depuis Admin. Le nouveau produit doit apparaître sans modification du HTML. Vérifiez manuellement le virement avant de marquer la commande payée.
+	- `PRINTFUL_API_KEY` : token privé existant s’il est encore valide et non compromis; droits de lecture `sync_products` et gestion `orders` requis.
+	- `STRIPE_SECRET_KEY` : clé secrète du compte Stripe, dans le même mode (test ou production) que son webhook.
+	- `STRIPE_WEBHOOK_SECRET` : secret `whsec_…` du endpoint Stripe décrit ci-dessous.
+	- `GOOGLE_CLIENT_ID` : identifiant client OAuth Web.
+	- `PRINTFUL_WEBHOOK_TOKEN` : secret aléatoire réservé à l’URL du webhook Printful.
+	- `BANK_ACCOUNT_HOLDER`, `BANK_IBAN`, `BANK_BIC` : facultatifs; nécessaires uniquement si le virement manuel est proposé.
 
-## Sécurité
+	`ADMIN_EMAIL` et `STORE_CURRENCY` sont déjà configurés dans `wrangler.jsonc`. Ne colle jamais de secret dans le chat, un fichier public ou GitHub. L’ancienne clé Printful a déjà été exposée dans l’historique public du dépôt : ne la réutilise pas si c’est encore la clé active; révoque-la dans ce cas. Si le token privé actuel est une autre clé valide, réutilise-le.
 
-Une ancienne clé Printful a été publiée dans le dépôt. Considérez-la comme compromise et révoquez-la dans Printful; créez-en une nouvelle et ajoutez-la seulement dans les variables privées de Render. Ne partagez pas le contenu de `.env`.
+## Publier
 
-Les coordonnées `BANK_ACCOUNT_HOLDER`, `BANK_IBAN` et `BANK_BIC` restent dans les variables privées du serveur. L’IBAN et le titulaire sont ensuite affichés au client au moment de payer par virement. Aucune connexion au compte bancaire ni clé API bancaire n’est utilisée. Les commandes sont conservées dans SQLite sous `data/ungriff.db`.
+Pour une publication directe, connecte-toi avec `npx wrangler login`, puis exécute `npx wrangler deploy`. Wrangler détecte le compte connecté; le `database_id` D1 doit déjà être remplacé dans `wrangler.jsonc`. Cloudflare fournit une adresse `*.workers.dev` sans frais d’hébergement supplémentaires.
+
+Pour le déploiement automatique sur chaque push vers `main`, ajoute dans GitHub Actions :
+
+- Secret `CLOUDFLARE_API_TOKEN` avec les droits de gestion Workers et D1.
+- Variable de dépôt `CLOUDFLARE_ACCOUNT_ID`.
+
+Le workflow `.github/workflows/deploy-cloudflare.yml` applique les migrations D1 puis publie les assets et le Worker. La base D1 doit d’abord être créée et son `database_id` enregistré dans `wrangler.jsonc`.
+
+## Relier les services
+
+1. Dans Stripe, crée un endpoint webhook `https://<adresse-worker>/api/stripe/webhook` pour `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.expired` et `checkout.session.async_payment_failed`. Enregistre son secret `whsec_…` comme `STRIPE_WEBHOOK_SECRET`.
+2. Dans Printful, configure les webhooks `package_shipped`, `order_updated`, `order_failed` et `order_canceled` à l’adresse `https://<adresse-worker>/api/webhooks/printful/<PRINTFUL_WEBHOOK_TOKEN>`. Printful ne fournit pas de signature vérifiable dans cet endpoint documenté; l’URL contient donc un secret d’accès. Garde-le privé.
+3. Dans Google Cloud Console, ajoute l’origine `https://<adresse-worker>` aux origines JavaScript autorisées du client OAuth. L’administrateur autorisé par défaut est `m6739376@gmail.com`.
+4. Vérifie dans Printful que les articles sont publiés/synchronisés dans le store lié au token, avec au moins une variante vendable et un prix de vente. La synchronisation du site ne peut afficher que les produits réellement renvoyés par ce store.
+
+## Essai et limites
+
+`npm run dev` lance Wrangler localement. D1 local nécessite `npm run db:local`. Les paiements, les appels Printful et les webhooks ne seront réels qu’après configuration des secrets et publication; aucun faux produit ni faux paiement n’est créé par le code.
+
+Le dossier de travail actuel n’est pas un clone Git (pas de dossier `.git`), ne contient pas de `.env`, et cette machine ne détecte pas `git`, `node` ou `npm`. Les fichiers peuvent être préparés ici, mais la validation Wrangler et le push GitHub doivent être faits depuis un clone équipé de Node/Git et connecté aux comptes Cloudflare/GitHub. La base SQLite de l’ancien service Render n’est pas automatiquement migrée vers D1; son fichier local n’est pas présent ici.
+
+Avant d’ouvrir les ventes, renseigne et publie les mentions légales, conditions de vente, politique de confidentialité/retours, coordonnées vendeur et règles de TVA applicables. Cette configuration technique ne remplace pas ces obligations.
