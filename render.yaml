@@ -25,3 +25,5 @@ services:
         sync: false
       - key: BANK_IBAN
         sync: false
+      - key: BANK_BIC
+        sync: false
